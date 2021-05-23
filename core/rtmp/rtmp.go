@@ -8,14 +8,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/nareix/joy5/format/flv"
 	"github.com/nareix/joy5/format/flv/flvio"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/nareix/joy5/format/rtmp"
-	"github.com/owncast/owncast/config"
+	"github.com/owncast/owncast/core/data"
 	"github.com/owncast/owncast/models"
 	"github.com/owncast/owncast/utils"
 )
@@ -30,22 +29,22 @@ var _rtmpConnection net.Conn
 var _setStreamAsConnected func()
 var _setBroadcaster func(models.Broadcaster)
 
-//Start starts the rtmp service, listening on port 1935
+// Start starts the rtmp service, listening on specified RTMP port.
 func Start(setStreamAsConnected func(), setBroadcaster func(models.Broadcaster)) {
 	_setStreamAsConnected = setStreamAsConnected
 	_setBroadcaster = setBroadcaster
 
-	port := 1935
+	port := data.GetRTMPPortNumber()
 	s := rtmp.NewServer()
 	var lis net.Listener
 	var err error
 	if lis, err = net.Listen("tcp", fmt.Sprintf(":%d", port)); err != nil {
-		return
+		log.Fatal(err)
 	}
 
 	s.LogEvent = func(c *rtmp.Conn, nc net.Conn, e int) {
 		es := rtmp.EventString[e]
-		log.Traceln(unsafe.Pointer(c), nc.LocalAddr(), nc.RemoteAddr(), es)
+		log.Traceln("RTMP", nc.LocalAddr(), nc.RemoteAddr(), es)
 	}
 
 	s.HandleConn = HandleConn
@@ -81,25 +80,30 @@ func HandleConn(c *rtmp.Conn, nc net.Conn) {
 
 	streamingKeyComponents := strings.Split(c.URL.Path, "/")
 	streamingKey := streamingKeyComponents[len(streamingKeyComponents)-1]
-	if streamingKey != config.Config.VideoSettings.StreamingKey {
+	if streamingKey != data.GetStreamKey() {
 		log.Errorln("invalid streaming key; rejecting incoming stream")
 		nc.Close()
 		return
 	}
 
-	log.Infoln("Incoming RTMP connected.")
+	log.Infoln("Inbound stream connected.")
+	_setStreamAsConnected()
 
-	pipePath := utils.GetTemporaryPipePath()
-	syscall.Mkfifo(pipePath, 0666)
+	pipePath := utils.GetTemporaryPipePath(fmt.Sprint(data.GetRTMPPortNumber()))
+	if !utils.DoesFileExists(pipePath) {
+		err := syscall.Mkfifo(pipePath, 0666)
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
 
 	_hasInboundRTMPConnection = true
-	_setStreamAsConnected()
 	_rtmpConnection = nc
 
 	f, err := os.OpenFile(pipePath, os.O_RDWR, os.ModeNamedPipe)
 	_pipe = f
 	if err != nil {
-		panic(err)
+		log.Fatalln("unable to open", pipePath, "and will exit")
 	}
 
 	w := flv.NewMuxer(f)
@@ -109,17 +113,32 @@ func HandleConn(c *rtmp.Conn, nc net.Conn) {
 			break
 		}
 
+		// If we don't get a readable packet in 10 seconds give up and disconnect
+		if err := _rtmpConnection.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			log.Debugln(err)
+		}
+
 		pkt, err := c.ReadPacket()
+
+		// Broadcaster disconnected
 		if err == io.EOF {
 			handleDisconnect(nc)
-			break
+			return
+		}
+
+		// Read timeout.  Disconnect.
+		if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
+			log.Debugln("Timeout reading the inbound stream from the broadcaster.  Assuming that they disconnected and ending the stream.")
+			handleDisconnect(nc)
+			return
 		}
 
 		if err := w.WritePacket(pkt); err != nil {
-			panic(err)
+			log.Errorln("unable to write rtmp packet", err)
+			handleDisconnect(nc)
+			return
 		}
 	}
-
 }
 
 func handleDisconnect(conn net.Conn) {
@@ -127,7 +146,7 @@ func handleDisconnect(conn net.Conn) {
 		return
 	}
 
-	log.Infoln("RTMP disconnected.")
+	log.Infoln("Inbound stream disconnected.")
 	conn.Close()
 	_pipe.Close()
 	_hasInboundRTMPConnection = false

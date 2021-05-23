@@ -17,6 +17,14 @@ html {
   scrollbar-width: none;
 }
 
+#loading-logo {
+  margin-top: 3%;
+  margin-left: auto;
+  margin-right: auto;
+  height: 80vh;
+  opacity: 0.2;
+}
+
 a:hover {
   text-decoration: underline;
 }
@@ -39,6 +47,7 @@ button[disabled] {
   pointer-events: none;
 }
 
+/* accessibility things */
 .visually-hidden {
   position: absolute !important;
   height: 1px;
@@ -58,12 +67,13 @@ header {
 
 #logo-container {
   background-size: 1.35em;
+  padding: 1.15rem;
+  background-image: url(/img/logo.svg);
 }
 
 #chat-toggle {
   min-width: 3rem;
 }
-
 
 #user-info-change {
   display: none;
@@ -73,6 +83,43 @@ header {
 #stream-info span {
   font-size: .70rem;
 }
+#stream-viewer-count {
+  display: none;
+}
+.online #stream-viewer-count {
+  display: inline;
+}
+
+#external-actions-container {
+  margin: 1em 0;
+
+}
+.external-action-button {
+  border-radius: 4px;
+  color: #fff;
+  font-size: .88em;
+  padding: .25em .75em;
+  margin: .35em;
+  margin-left: 0;
+  display: flex;
+  max-width: 250px;
+  padding-top: .3em;
+}
+.external-action-button:hover {
+  text-decoration: underline;
+}
+.external-action-icon {
+  margin: .25em .5em .25em 0;
+}
+.external-action-icon img {
+  height: 1.5em;
+  width: 1.5em;
+}
+.external-action-label {
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
 
 
 /* ************************************************ */
@@ -199,16 +246,16 @@ header {
 }
 
 @media screen and (max-height: 500px) {
-  .single-col.touch-screen {
+  .single-col.touch-screen:not(.touch-keyboard-active) {
     --header-height: 0px;
   }
-  .single-col.touch-screen header {
+  .single-col.touch-screen:not(.touch-keyboard-active) header {
     display: none;
   }
 }
 
 
-/* ************************************************8 */
+/* ************************************************ */
 
 
 @media screen and (max-width: 860px) {
@@ -222,5 +269,22 @@ header {
   .instance-title {
     font-size: 1rem;
   }
+}
 
+/* ************************************************ */
+
+
+@media screen and (max-width: 600px) {
+  #user-info-change {
+    width: 75vw;
+  }
+  #user-info-display {
+    max-width: 30vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+#external-modal-iframe {
+  height: 70vh;
 }

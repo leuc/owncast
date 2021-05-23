@@ -1,41 +1,44 @@
 package core
 
 import (
-	"errors"
-
 	"github.com/owncast/owncast/core/chat"
 	"github.com/owncast/owncast/models"
 )
 
-//ChatListenerImpl the implementation of the chat client
+// ChatListenerImpl the implementation of the chat client.
 type ChatListenerImpl struct{}
 
-//ClientAdded is for when a client is added the system
+// ClientAdded is for when a client is added the system.
 func (cl ChatListenerImpl) ClientAdded(client models.Client) {
-	SetClientActive(client)
+	SetChatClientActive(client)
 }
 
-//ClientRemoved is for when a client disconnects/is removed
+// ClientRemoved is for when a client disconnects/is removed.
 func (cl ChatListenerImpl) ClientRemoved(clientID string) {
-	RemoveClient(clientID)
+	RemoveChatClient(clientID)
 }
 
-//MessageSent is for when a message is sent
-func (cl ChatListenerImpl) MessageSent(message models.ChatMessage) {
+// MessageSent is for when a message is sent.
+func (cl ChatListenerImpl) MessageSent(message models.ChatEvent) {
 }
 
-//SendMessageToChat sends a message to the chat server
-func SendMessageToChat(message models.ChatMessage) error {
-	if !message.Valid() {
-		return errors.New("invalid chat message; id, author, and body are required")
-	}
+// IsStreamConnected will return if the stream is connected.
+func (cl ChatListenerImpl) IsStreamConnected() bool {
+	return IsStreamConnected()
+}
 
+// SendMessageToChat sends a message to the chat server.
+func SendMessageToChat(message models.ChatEvent) error {
 	chat.SendMessage(message)
 
 	return nil
 }
 
-//GetAllChatMessages gets all of the chat messages
-func GetAllChatMessages() []models.ChatMessage {
+// GetAllChatMessages gets all of the chat messages.
+func GetAllChatMessages() []models.ChatEvent {
 	return chat.GetMessages()
+}
+
+func GetModerationChatMessages() []models.ChatEvent {
+	return chat.GetModerationChatMessages()
 }

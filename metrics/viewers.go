@@ -6,8 +6,8 @@ import (
 	"github.com/owncast/owncast/core"
 )
 
-// How often we poll for updates
-const viewerMetricsPollingInterval = 5 * time.Minute
+// How often we poll for updates.
+const viewerMetricsPollingInterval = 2 * time.Minute
 
 func startViewerCollectionMetrics() {
 	collectViewerCount()

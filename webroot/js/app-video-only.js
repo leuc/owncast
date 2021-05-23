@@ -5,13 +5,18 @@ const html = htm.bind(h);
 import VideoPoster from './components/video-poster.js';
 import { OwncastPlayer } from './components/player.js';
 
-import {
-  addNewlines,
-  pluralize,
-} from './utils/helpers.js';
+// We count viewers by concurrent websocket connections.
+// So for now let's make a connection just so it can
+// be counted.
+// https://github.com/owncast/owncast/discussions/374
+import Websocket from './utils/websocket.js';
+const websocket = new Websocket();
+
+import { addNewlines, pluralize } from './utils/helpers.js';
 import {
   URL_CONFIG,
   URL_STATUS,
+  URL_VIEWER_PING,
   TIMER_STATUS_UPDATE,
   TIMER_STREAM_DURATION_COUNTER,
   TEMP_IMAGE,
@@ -27,7 +32,7 @@ export default class VideoOnly extends Component {
       configData: {},
 
       playerActive: false, // player object is active
-      streamOnline: false,  // stream is active/online
+      streamOnline: false, // stream is active/online
 
       isPlaying: false,
 
@@ -80,36 +85,42 @@ export default class VideoOnly extends Component {
   // fetch /config data
   getConfig() {
     fetch(URL_CONFIG)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`Network response was not ok ${response.ok}`);
-      }
-      return response.json();
-    })
-    .then(json => {
-      this.setConfigData(json);
-    })
-    .catch(error => {
-      this.handleNetworkingError(`Fetch config: ${error}`);
-    });
-  }
-
-  // fetch stream status
-  getStreamStatus() {
-    fetch(URL_STATUS)
-      .then(response => {
+      .then((response) => {
         if (!response.ok) {
           throw new Error(`Network response was not ok ${response.ok}`);
         }
         return response.json();
       })
-      .then(json => {
+      .then((json) => {
+        this.setConfigData(json);
+      })
+      .catch((error) => {
+        this.handleNetworkingError(`Fetch config: ${error}`);
+      });
+  }
+
+  // fetch stream status
+  getStreamStatus() {
+    fetch(URL_STATUS)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Network response was not ok ${response.ok}`);
+        }
+        return response.json();
+      })
+      .then((json) => {
         this.updateStreamStatus(json);
       })
-      .catch(error => {
+      .catch((error) => {
         this.handleOfflineMode();
         this.handleNetworkingError(`Stream status: ${error}`);
       });
+
+    // Ping the API to let them know we're an active viewer
+    fetch(URL_VIEWER_PING).catch((error) => {
+      this.handleOfflineMode();
+      this.handleNetworkingError(`Viewer PING error: ${error}`);
+    });
   }
 
   setConfigData(data = {}) {
@@ -130,10 +141,7 @@ export default class VideoOnly extends Component {
     if (!status) {
       return;
     }
-    const {
-      viewerCount,
-      online,
-    } = status;
+    const { viewerCount, online } = status;
 
     this.lastDisconnectTime = status.lastDisconnectTime;
 
@@ -190,8 +198,10 @@ export default class VideoOnly extends Component {
   handleOnlineMode() {
     this.player.startPlayer();
 
-    this.streamDurationTimer =
-      setInterval(this.setCurrentStreamDuration, TIMER_STREAM_DURATION_COUNTER);
+    this.streamDurationTimer = setInterval(
+      this.setCurrentStreamDuration,
+      TIMER_STREAM_DURATION_COUNTER
+    );
 
     this.setState({
       playerActive: true,
@@ -215,43 +225,40 @@ export default class VideoOnly extends Component {
       isPlaying,
     } = state;
 
-    const {
-      logo = {},
-    } = configData;
-    const { large: largeLogo = TEMP_IMAGE } = logo;
-    const streamInfoClass = streamOnline ? 'online' : ''; // need?
+    const { logo = TEMP_IMAGE } = configData;
 
     const mainClass = playerActive ? 'online' : '';
 
-    const poster = isPlaying ? null : html`
-      <${VideoPoster} offlineImage=${largeLogo} active=${streamOnline} />
-    `;
-    return (
-      html`
-        <main class=${mainClass}>
-          <div
-            id="video-container"
-            class="flex owncast-video-container bg-black w-full bg-center bg-no-repeat flex flex-col items-center justify-start"
-          >
-            <video
-              class="video-js vjs-big-play-centered display-block w-full h-full"
-              id="video"
-              preload="auto"
-              controls
-              playsinline
-            ></video>
-            ${poster}
-          </div>
+    const poster = isPlaying
+      ? null
+      : html` <${VideoPoster} offlineImage=${logo} active=${streamOnline} /> `;
+    return html`
+      <main class=${mainClass}>
+        <div
+          id="video-container"
+          class="flex owncast-video-container bg-black w-full bg-center bg-no-repeat flex flex-col items-center justify-start"
+        >
+          <video
+            class="video-js vjs-big-play-centered display-block w-full h-full"
+            id="video"
+            preload="auto"
+            controls
+            playsinline
+          ></video>
+          ${poster}
+        </div>
 
-          <section
-            id="stream-info"
-            aria-label="Stream status"
-            class="flex text-center flex-row justify-between font-mono py-2 px-8 bg-gray-900 text-indigo-200 shadow-md border-b border-gray-100 border-solid ${streamInfoClass}"
+        <section
+          id="stream-info"
+          aria-label="Stream status"
+          class="flex text-center flex-row justify-between font-mono py-2 px-8 bg-gray-900 text-indigo-200 shadow-md border-b border-gray-100 border-solid"
+        >
+          <span>${streamStatusMessage}</span>
+          <span id="stream-viewer-count"
+            >${viewerCount} ${pluralize('viewer', viewerCount)}.</span
           >
-            <span>${streamStatusMessage}</span>
-            <span>${viewerCount} ${pluralize('viewer', viewerCount)}.</span>
-          </section>
-        </main>
-    `);
+        </section>
+      </main>
+    `;
   }
 }

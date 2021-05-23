@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
-	"fmt"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/markbates/pkger"
 	"github.com/owncast/owncast/logging"
@@ -14,31 +16,66 @@ import (
 	"github.com/owncast/owncast/core/data"
 	"github.com/owncast/owncast/metrics"
 	"github.com/owncast/owncast/router"
+	"github.com/owncast/owncast/utils"
 )
 
-// the following are injected at build-time
+// the following are injected at build-time.
 var (
-	//GitCommit is the commit which this version of owncast is running
-	GitCommit = "unknown"
-	//BuildVersion is the version
-	BuildVersion = "0.0.0"
-	//BuildType is the type of build
-	BuildType = "localdev"
+	// GitCommit is the commit which this version of owncast is running.
+	GitCommit = ""
+	// BuildVersion is the version.
+	BuildVersion = config.StaticVersionNumber
+	// BuildPlatform is the type of build.
+	BuildPlatform = ""
 )
 
 func main() {
 	configureLogging()
 
-	log.Infoln(getReleaseString())
 	// Enable bundling of admin assets
-	pkger.Include("/admin")
+	_ = pkger.Include("/admin")
 
-	configFile := flag.String("configFile", "config.yaml", "Config File full path. Defaults to current folder")
+	configFile := flag.String("configFile", "config.yaml", "Config file path to migrate to the new database")
 	dbFile := flag.String("database", "", "Path to the database file.")
 	enableDebugOptions := flag.Bool("enableDebugFeatures", false, "Enable additional debugging options.")
 	enableVerboseLogging := flag.Bool("enableVerboseLogging", false, "Enable additional logging.")
+	restoreDatabaseFile := flag.String("restoreDatabase", "", "Restore an Owncast database backup")
+	newStreamKey := flag.String("streamkey", "", "Set your stream key/admin password")
+	webServerPortOverride := flag.String("webserverport", "", "Force the web server to listen on a specific port")
 
 	flag.Parse()
+
+	config.ConfigFilePath = *configFile
+	config.VersionNumber = BuildVersion
+	if GitCommit != "" {
+		config.GitCommit = GitCommit
+	} else {
+		config.GitCommit = time.Now().Format("20060102")
+	}
+	if BuildPlatform != "" {
+		config.BuildPlatform = BuildPlatform
+	}
+	log.Infoln(config.GetReleaseString())
+
+	// Create the data directory if needed
+	if !utils.DoesFileExists("data") {
+		os.Mkdir("./data", 0700)
+	}
+
+	// Allows a user to restore a specific database backup
+	if *restoreDatabaseFile != "" {
+		databaseFile := config.DatabaseFilePath
+		if *dbFile != "" {
+			databaseFile = *dbFile
+		}
+
+		if err := utils.Restore(*restoreDatabaseFile, databaseFile); err != nil {
+			log.Fatalln(err)
+		}
+
+		log.Println("Database has been restored.  Restart Owncast.")
+		log.Exit(0)
+	}
 
 	if *enableDebugOptions {
 		logrus.SetReportCaller(true)
@@ -50,40 +87,52 @@ func main() {
 		log.SetLevel(log.InfoLevel)
 	}
 
-	if err := config.Load(*configFile, getReleaseString(), getVersionNumber()); err != nil {
-		panic(err)
-	}
-	config.Config.EnableDebugFeatures = *enableDebugOptions
+	config.EnableDebugFeatures = *enableDebugOptions
 
 	if *dbFile != "" {
-		config.Config.DatabaseFilePath = *dbFile
-	} else if config.Config.DatabaseFilePath == "" {
-		config.Config.DatabaseFilePath = config.Config.GetDataFilePath()
+		config.DatabaseFilePath = *dbFile
 	}
 
 	go metrics.Start()
 
-	data.SetupPersistence()
+	err := data.SetupPersistence(config.DatabaseFilePath)
+	if err != nil {
+		log.Fatalln("failed to open database", err)
+	}
+
+	if *newStreamKey != "" {
+		if err := data.SetStreamKey(*newStreamKey); err != nil {
+			log.Errorln("Error setting your stream key.", err)
+		} else {
+			log.Infoln("Stream key changed to", *newStreamKey)
+		}
+
+		log.Exit(0)
+	}
+
+	// Set the web server port
+	if *webServerPortOverride != "" {
+		portNumber, err := strconv.Atoi(*webServerPortOverride)
+		if err != nil {
+			log.Warnln(err)
+			return
+		}
+
+		log.Println("Saving new web server port number to", portNumber)
+		data.SetHTTPPortNumber(float64(portNumber))
+	}
+
+	config.WebServerPort = data.GetHTTPPortNumber()
 
 	// starts the core
 	if err := core.Start(); err != nil {
-		log.Error("failed to start the core package")
-		panic(err)
+		log.Fatalln("failed to start the core package", err)
 	}
 
 	if err := router.Start(); err != nil {
-		log.Error("failed to start/run the router")
-		panic(err)
+		log.Fatalln("failed to start/run the router", err)
 	}
-}
 
-//getReleaseString gets the version string
-func getReleaseString() string {
-	return fmt.Sprintf("Owncast v%s-%s (%s)", BuildVersion, BuildType, GitCommit)
-}
-
-func getVersionNumber() string {
-	return BuildVersion
 }
 
 func configureLogging() {

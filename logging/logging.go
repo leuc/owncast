@@ -4,6 +4,7 @@ package logging
 // Modeled after https://github.com/sirupsen/logrus/blob/master/hooks/test/test.go
 
 import (
+	"math"
 	"os"
 	"sync"
 
@@ -14,13 +15,14 @@ import (
 const maxLogEntries = 500
 
 type OCLogger struct {
-	Entries []logrus.Entry
-	mu      sync.RWMutex
+	Entries  []logrus.Entry
+	Warnings []logrus.Entry
+	mu       sync.RWMutex
 }
 
 var Logger *OCLogger
 
-// Setup configures our custom logging destinations
+// Setup configures our custom logging destinations.
 func Setup() {
 	logger.SetOutput(os.Stdout) // Send all logs to console
 
@@ -30,21 +32,29 @@ func Setup() {
 	Logger = _logger
 }
 
-// Fire runs for every logging request
+// Fire runs for every logging request.
 func (l *OCLogger) Fire(e *logger.Entry) error {
 	// Store all log messages to return back in the logging API
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	// Append to log entries
 	if len(l.Entries) > maxLogEntries {
 		l.Entries = l.Entries[1:]
 	}
 	l.Entries = append(l.Entries, *e)
 
+	if e.Level <= logger.WarnLevel {
+		if len(l.Warnings) > maxLogEntries {
+			l.Warnings = l.Warnings[1:]
+		}
+		l.Warnings = append(l.Warnings, *e)
+	}
+
 	return nil
 }
 
-// Levels specifies what log levels we care about
+// Levels specifies what log levels we care about.
 func (l *OCLogger) Levels() []logrus.Level {
 	return logrus.AllLevels
 }
@@ -53,11 +63,13 @@ func (l *OCLogger) Levels() []logrus.Level {
 func (l *OCLogger) AllEntries() []*logrus.Entry {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+
 	// Make a copy so the returned value won't race with future log requests
-	entries := make([]*logrus.Entry, len(l.Entries))
-	for i := 0; i < len(l.Entries); i++ {
+	logCount := int(math.Min(float64(len(l.Entries)), maxLogEntries))
+	entries := make([]*logrus.Entry, logCount)
+	for i := 0; i < len(entries); i++ {
 		// Make a copy, for safety
-		entries[i] = &l.Entries[i]
+		entries[len(entries)-logCount:][i] = &l.Entries[i]
 	}
 
 	return entries
@@ -67,13 +79,13 @@ func (l *OCLogger) AllEntries() []*logrus.Entry {
 func (l *OCLogger) WarningEntries() []*logrus.Entry {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+
 	// Make a copy so the returned value won't race with future log requests
-	entries := make([]*logrus.Entry, 0)
-	for i := 0; i < len(l.Entries); i++ {
-		if l.Entries[i].Level <= logrus.WarnLevel {
-			// Make a copy, for safety
-			entries = append(entries, &l.Entries[i])
-		}
+	logCount := int(math.Min(float64(len(l.Warnings)), maxLogEntries))
+	entries := make([]*logrus.Entry, logCount)
+	for i := 0; i < len(entries); i++ {
+		// Make a copy, for safety
+		entries[len(entries)-logCount:][i] = &l.Warnings[i]
 	}
 
 	return entries

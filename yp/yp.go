@@ -5,12 +5,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 
 	"encoding/json"
 
 	"github.com/owncast/owncast/config"
+	"github.com/owncast/owncast/core/data"
 	"github.com/owncast/owncast/models"
 
 	log "github.com/sirupsen/logrus"
@@ -38,35 +38,43 @@ type ypPingRequest struct {
 	URL string `json:"url"`
 }
 
-// NewYP creates a new instance of the YP service handler
+// NewYP creates a new instance of the YP service handler.
 func NewYP(getStatusFunc func() models.Status) *YP {
 	getStatus = getStatusFunc
 	return &YP{}
 }
 
-// Start is run when a live stream begins to start pinging YP
+// Start is run when a live stream begins to start pinging YP.
 func (yp *YP) Start() {
 	yp.timer = time.NewTicker(pingInterval)
-
-	go func() {
-		for {
-			select {
-			case <-yp.timer.C:
-				yp.ping()
-			}
-		}
-	}()
+	for range yp.timer.C {
+		yp.ping()
+	}
 
 	yp.ping()
 }
 
-// Stop stops the pinging of YP
+// Stop stops the pinging of YP.
 func (yp *YP) Stop() {
 	yp.timer.Stop()
 }
 
 func (yp *YP) ping() {
-	myInstanceURL := config.Config.YP.InstanceURL
+	if !data.GetDirectoryEnabled() {
+		return
+	}
+
+	// Hack: Don't allow ping'ing when offline.
+	// It shouldn't even be trying to, but on some instances the ping timer isn't stopping.
+	if !getStatus().Online {
+		return
+	}
+
+	myInstanceURL := data.GetServerURL()
+	if myInstanceURL == "" {
+		log.Warnln("Server URL not set in the configuration. Directory access is disabled until this is set.")
+		return
+	}
 	isValidInstanceURL := isUrl(myInstanceURL)
 	if myInstanceURL == "" || !isValidInstanceURL {
 		if !_inErrorState {
@@ -76,9 +84,9 @@ func (yp *YP) ping() {
 		return
 	}
 
-	key := yp.getSavedKey()
+	key := data.GetDirectoryRegistrationKey()
 
-	log.Traceln("Pinging YP as: ", config.Config.InstanceDetails.Name)
+	log.Traceln("Pinging YP as: ", data.GetServerName(), "with key", key)
 
 	request := ypPingRequest{
 		Key: key,
@@ -91,8 +99,8 @@ func (yp *YP) ping() {
 		return
 	}
 
-	pingURL := config.Config.GetYPServiceHost() + "/ping"
-	resp, err := http.Post(pingURL, "application/json", bytes.NewBuffer(req))
+	pingURL := config.GetDefaults().YPServer + "/api/ping"
+	resp, err := http.Post(pingURL, "application/json", bytes.NewBuffer(req)) //nolint
 	if err != nil {
 		log.Errorln(err)
 		return
@@ -105,7 +113,10 @@ func (yp *YP) ping() {
 	}
 
 	pingResponse := ypPingResponse{}
-	json.Unmarshal(body, &pingResponse)
+	err = json.Unmarshal(body, &pingResponse)
+	if err != nil {
+		log.Errorln(err)
+	}
 
 	if !pingResponse.Success {
 		if !_inErrorState {
@@ -118,40 +129,10 @@ func (yp *YP) ping() {
 	_inErrorState = false
 
 	if pingResponse.Key != key {
-		yp.writeSavedKey(pingResponse.Key)
+		data.SetDirectoryRegistrationKey(key)
 	}
 }
 
-func (yp *YP) writeSavedKey(key string) {
-	f, err := os.Create(".yp.key")
-	if err != nil {
-		log.Errorln(err)
-		return
-	}
-	defer f.Close()
-
-	_, err = f.WriteString(key)
-	if err != nil {
-		log.Errorln(err)
-		return
-	}
-}
-
-func (yp *YP) getSavedKey() string {
-	fileBytes, err := ioutil.ReadFile(".yp.key")
-	if err != nil {
-		return ""
-	}
-
-	return string(fileBytes)
-}
-
-// DisplayInstructions will let the user know they are not in the directory by default and
-// how they can enable the feature.
-func DisplayInstructions() {
-	text := "Your instance can be listed on the Owncast directory at http://directory.owncast.online by enabling YP in your config.  Learn more at https://directory.owncast.online/get-listed."
-	log.Debugln(text)
-}
 func isUrl(str string) bool {
 	u, err := url.Parse(str)
 	return err == nil && u.Scheme != "" && u.Host != ""

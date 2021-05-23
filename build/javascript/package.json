@@ -4,18 +4,20 @@
   "description": "Javascript dependencies for Owncast web app",
   "main": "index.js",
   "dependencies": {
-    "@joeattardi/emoji-button": "^4.3.0",
+    "@joeattardi/emoji-button": "^4.6.0",
     "@justinribeiro/lite-youtube": "^0.9.1",
+    "@videojs/http-streaming": "2.8.2",
     "@videojs/themes": "^1.0.1",
     "htm": "^3.0.4",
-    "preact": "^10.5.5",
+    "mark.js": "^8.11.1",
+    "preact": "10.5.10",
     "tailwindcss": "^1.9.6",
-    "video.js": "7.10.2",
-    "@videojs/http-streaming": "2.3.0"
+    "video.js": "7.11.8"
   },
   "devDependencies": {
-    "cssnano": "^4.1.10",
-    "postcss-cli": "^8.2.0"
+    "cssnano": "^5.0.3",
+    "postcss": "^8.3.0",
+    "postcss-cli": "^8.3.1"
   },
   "snowpack": {
     "install": [
@@ -27,6 +29,7 @@
       "@justinribeiro/lite-youtube",
       "htm",
       "preact",
+      "mark.js/dist/mark.es6.min.js",
       "tailwindcss/dist/tailwind.min.css"
     ],
     "alias": {
@@ -35,7 +38,7 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npm install && npx snowpack install && cp node_modules/video.js/dist/video-js.min.css web_modules/videojs && cp -R web_modules ../../webroot/js"
+    "build": "npm install && npx snowpack@2.18.4 install && cp node_modules/video.js/dist/video-js.min.css web_modules/videojs && cp -R web_modules ../../webroot/js"
   },
   "author": "Owncast",
   "license": "ISC"

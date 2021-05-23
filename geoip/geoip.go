@@ -8,14 +8,14 @@ import (
 	"net"
 
 	"github.com/oschwald/geoip2-golang"
-	"github.com/owncast/owncast/config"
 	log "github.com/sirupsen/logrus"
 )
 
 var _geoIPCache = map[string]GeoDetails{}
 var _enabled = true // Try to use GeoIP support it by default.
+var geoIPDatabasePath = "data/GeoLite2-City.mmdb"
 
-// GeoDetails stores details about a location
+// GeoDetails stores details about a location.
 type GeoDetails struct {
 	CountryCode string `json:"countryCode"`
 	RegionName  string `json:"regionName"`
@@ -27,6 +27,14 @@ type GeoDetails struct {
 func GetGeoFromIP(ip string) *GeoDetails {
 	if cachedGeoDetails, ok := _geoIPCache[ip]; ok {
 		return &cachedGeoDetails
+	}
+
+	if ip == "::1" || ip == "127.0.0.1" {
+		return &GeoDetails{
+			CountryCode: "N/A",
+			RegionName:  "Localhost",
+			TimeZone:    "",
+		}
 	}
 
 	return nil
@@ -45,7 +53,7 @@ func FetchGeoForIP(ip string) {
 	}
 
 	go func() {
-		db, err := geoip2.Open(config.GeoIPDatabasePath)
+		db, err := geoip2.Open(geoIPDatabasePath)
 		if err != nil {
 			log.Traceln("GeoIP support is disabled. visit http://owncast.online/docs/geoip to learn how to enable.", err)
 			_enabled = false
@@ -72,13 +80,19 @@ func FetchGeoForIP(ip string) {
 			return
 		}
 
+		var regionName = "Unknown"
+		if len(record.Subdivisions) > 0 {
+			if region, ok := record.Subdivisions[0].Names["en"]; ok {
+				regionName = region
+			}
+		}
+
 		response := GeoDetails{
 			CountryCode: record.Country.IsoCode,
-			RegionName:  record.Subdivisions[0].Names["en"],
+			RegionName:  regionName,
 			TimeZone:    record.Location.TimeZone,
 		}
 
 		_geoIPCache[ip] = response
 	}()
-
 }

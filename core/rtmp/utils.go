@@ -5,13 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
-	"github.com/owncast/owncast/models"
 	"github.com/nareix/joy5/format/flv/flvio"
+	"github.com/owncast/owncast/models"
 )
+
+const unknownString = "Unknown"
 
 func getInboundDetailsFromMetadata(metadata []interface{}) (models.RTMPStreamMetadata, error) {
 	metadataComponentsString := fmt.Sprintf("%+v", metadata)
+	if !strings.Contains(metadataComponentsString, "onMetaData") {
+		return models.RTMPStreamMetadata{}, errors.New("Not a onMetaData message")
+	}
 	re := regexp.MustCompile(`\{(.*?)\}`)
 	submatchall := re.FindAllString(metadataComponentsString, 1)
 
@@ -21,11 +27,15 @@ func getInboundDetailsFromMetadata(metadata []interface{}) (models.RTMPStreamMet
 
 	metadataJSONString := submatchall[0]
 	var details models.RTMPStreamMetadata
-	json.Unmarshal([]byte(metadataJSONString), &details)
-	return details, nil
+	err := json.Unmarshal([]byte(metadataJSONString), &details)
+	return details, err
 }
 
 func getAudioCodec(codec interface{}) string {
+	if codec == nil {
+		return "No audio"
+	}
+
 	var codecID float64
 	if assertedCodecID, ok := codec.(float64); ok {
 		codecID = assertedCodecID
@@ -42,10 +52,14 @@ func getAudioCodec(codec interface{}) string {
 		return "Speex"
 	}
 
-	return "Unknown"
+	return unknownString
 }
 
 func getVideoCodec(codec interface{}) string {
+	if codec == nil {
+		return unknownString
+	}
+
 	var codecID float64
 	if assertedCodecID, ok := codec.(float64); ok {
 		codecID = assertedCodecID
@@ -60,5 +74,5 @@ func getVideoCodec(codec interface{}) string {
 		return "H.265"
 	}
 
-	return "Unknown"
+	return unknownString
 }

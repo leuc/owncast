@@ -1,13 +1,25 @@
 /* some base styles for chat and messaging components */
 
+:root {
+  /* Override this in your custom CSS to change the
+     opacity of the message backgrounds. */
+  --message-background-alpha: 0.3;
+}
+
 #chat-container {
   position: fixed;
   z-index: 9;
-  top: var(--header-height);
+  bottom: 0;
   right: 0;
   width: var(--right-col-width);
 
   height: calc(100vh - var(--header-height));
+}
+
+@media screen and (max-width: 729px) {
+  #chat-container {
+    top: var(--header-height);
+  }
 }
 
 #message-input-container {
@@ -75,6 +87,9 @@
 
 /******************************/
 /* EMOJI PICKER OVERRIDES */
+.emoji-picker__wrapper {
+  margin-top: -30px !important;
+}
 .emoji-picker.owncast {
   --secondary-text-color: rgba(255, 255, 255, 0.5);
   --category-button-color: rgba(255, 255, 255, 0.5);
@@ -112,6 +127,10 @@
   scrollbar-color: var(--category-button-color) black;
 }
 
+.emoji-picker__search {
+  color: rgba(26, 32, 44, 1);
+}
+
 /* MESSAGE TEXT HTML */
 /* MESSAGE TEXT HTML */
 /* MESSAGE TEXT HTML */
@@ -119,7 +138,9 @@
   word-break: break-word;
 }
 .message-text a {
-  color: #7f9cf5; /* indigo-400 */
+  color: #ffffff;
+  text-shadow: 0px 1px #0a0a0a75;
+  font-size: 0.95rem;
 }
 .message-text a:hover {
   text-decoration: underline;

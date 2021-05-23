@@ -7,39 +7,74 @@ import '/js/web_modules/@justinribeiro/lite-youtube.js';
 import Message from './message.js';
 import ChatInput from './chat-input.js';
 import { CALLBACKS, SOCKET_MESSAGE_TYPES } from '../../utils/websocket.js';
-import { jumpToBottom, debounce } from '../../utils/helpers.js';
+import { jumpToBottom, debounce, getLocalStorage } from '../../utils/helpers.js';
 import { extraUserNamesFromMessageHistory } from '../../utils/chat.js';
-import { URL_CHAT_HISTORY, MESSAGE_JUMPTOBOTTOM_BUFFER } from '../../utils/constants.js';
+import { URL_CHAT_HISTORY, MESSAGE_JUMPTOBOTTOM_BUFFER, KEY_CUSTOM_USERNAME_SET } from '../../utils/constants.js';
 
 export default class Chat extends Component {
   constructor(props, context) {
     super(props, context);
 
     this.state = {
-      webSocketConnected: true,
-      messages: [],
       chatUserNames: [],
+      messages: [],
+      newMessagesReceived: false,
+      webSocketConnected: true,
     };
 
     this.scrollableMessagesContainer = createRef();
 
     this.websocket = null;
+    this.receivedFirstMessages = false;
+    this.receivedMessageUpdate = false;
+
+    this.windowBlurred = false;
+    this.numMessagesSinceBlur = 0;
 
     this.getChatHistory = this.getChatHistory.bind(this);
+    this.handleNetworkingError = this.handleNetworkingError.bind(this);
+    this.handleWindowBlur = this.handleWindowBlur.bind(this);
+    this.handleWindowFocus = this.handleWindowFocus.bind(this);
+    this.handleWindowResize = debounce(this.handleWindowResize.bind(this), 500);
+    this.messageListCallback = this.messageListCallback.bind(this);
     this.receivedWebsocketMessage = this.receivedWebsocketMessage.bind(this);
+    this.scrollToBottom = this.scrollToBottom.bind(this);
+    this.submitChat = this.submitChat.bind(this);
     this.websocketConnected = this.websocketConnected.bind(this);
     this.websocketDisconnected = this.websocketDisconnected.bind(this);
-    this.submitChat = this.submitChat.bind(this);
-    this.submitChat = this.submitChat.bind(this);
-    this.scrollToBottom = this.scrollToBottom.bind(this);
-    this.handleWindowResize = debounce(this.handleWindowResize.bind(this), 500);
   }
 
   componentDidMount() {
    this.setupWebSocketCallbacks();
    this.getChatHistory();
+
    window.addEventListener('resize', this.handleWindowResize);
+
+   if (!this.props.messagesOnly) {
+    window.addEventListener('blur', this.handleWindowBlur);
+    window.addEventListener('focus', this.handleWindowFocus);
+   }
+
+   this.messageListObserver = new MutationObserver(this.messageListCallback);
+   this.messageListObserver.observe(this.scrollableMessagesContainer.current, { childList: true });
   }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    const { username, chatInputEnabled } = this.props;
+    const { username: nextUserName, chatInputEnabled: nextChatEnabled } = nextProps;
+
+    const { webSocketConnected, messages, chatUserNames, newMessagesReceived } = this.state;
+    const {webSocketConnected: nextSocket, messages: nextMessages, chatUserNames: nextUserNames, newMessagesReceived: nextMessagesReceived } = nextState;
+
+    return (
+      username !== nextUserName ||
+      chatInputEnabled !== nextChatEnabled ||
+      webSocketConnected !== nextSocket ||
+      messages.length !== nextMessages.length ||
+      chatUserNames.length !== nextUserNames.length || newMessagesReceived !== nextMessagesReceived
+    );
+  }
+
 
   componentDidUpdate(prevProps, prevState) {
     const { username: prevName } = prevProps;
@@ -52,15 +87,21 @@ export default class Chat extends Component {
     if (prevName !== username) {
       this.sendUsernameChange(prevName, username);
     }
+
     // scroll to bottom of messages list when new ones come in
-    if (messages.length > prevMessages.length) {
-      if (!prevMessages.length || this.checkShouldScroll()) {
-        this.scrollToBottom();
-      }
+    if (messages.length !== prevMessages.length) {
+      this.setState({
+        newMessagesReceived: true,
+      });
     }
   }
   componentWillUnmount() {
     window.removeEventListener('resize', this.handleWindowResize);
+    if (!this.props.messagesOnly) {
+      window.removeEventListener('blur', this.handleWindowBlur);
+      window.removeEventListener('focus', this.handleWindowFocus);
+     }
+    this.messageListObserver.disconnect();
   }
 
   setupWebSocketCallbacks() {
@@ -85,16 +126,18 @@ export default class Chat extends Component {
       // extra user names
       const chatUserNames = extraUserNamesFromMessageHistory(data);
       this.setState({
-        messages: data,
+        messages: this.state.messages.concat(data),
         chatUserNames,
       });
     })
     .catch(error => {
-      // this.handleNetworkingError(`Fetch getChatHistory: ${error}`);
+      this.handleNetworkingError(`Fetch getChatHistory: ${error}`);
     });
   }
 
   sendUsernameChange(oldName, newName) {
+    clearTimeout(this.sendUserJoinedEvent);
+
 		const nameChange = {
 			type: SOCKET_MESSAGE_TYPES.NAME_CHANGE,
 			oldName,
@@ -104,18 +147,56 @@ export default class Chat extends Component {
   }
 
   receivedWebsocketMessage(message) {
-    this.addMessage(message);
+    this.handleMessage(message);
   }
 
-  addMessage(message) {
+  handleNetworkingError(error) {
+    // todo: something more useful
+    console.log(error);
+  }
+
+  // handle any incoming message
+  handleMessage(message) {
+    const {
+      id: messageId,
+      type: messageType,
+      timestamp: messageTimestamp,
+      visible: messageVisible,
+    } = message;
     const { messages: curMessages } = this.state;
+    const { messagesOnly } = this.props;
 
-    // if incoming message has same id as existing message, don't add it
-    const existing = curMessages.filter(function (item) {
-      return item.id === message.id;
-    })
+    const existingIndex = curMessages.findIndex(item => item.id === messageId);
 
-    if (existing.length === 0 || !existing) {
+    // If the message already exists and this is an update event
+    // then update it.
+    if (messageType === 'VISIBILITY-UPDATE') {
+      const updatedMessageList = [...curMessages];
+      const convertedMessage = {
+        ...message,
+        type: 'CHAT',
+      };
+      // if message exists and should now hide, take it out.
+      if (existingIndex >= 0 && !messageVisible) {
+        this.setState({
+          messages: curMessages.filter(item => item.id !== messageId),
+        });
+      } else if (existingIndex === -1 && messageVisible) {
+        // insert message at timestamp
+        const insertAtIndex = curMessages.findIndex((item, index) => {
+          const time = item.timestamp || messageTimestamp;
+          const nextMessage = index < curMessages.length - 1 && curMessages[index + 1];
+          const nextTime = nextMessage.timestamp || messageTimestamp;
+          const messageTimestampDate = new Date(messageTimestamp);
+          return messageTimestampDate > (new Date(time)) && messageTimestampDate <= (new Date(nextTime));
+        });
+        updatedMessageList.splice(insertAtIndex + 1, 0, convertedMessage);
+        this.setState({
+          messages: updatedMessageList,
+        });
+      }
+    } else if (existingIndex === -1) {
+      // else if message doesn't exist, add it and extra username
       const newState = {
         messages: [...curMessages, message],
       };
@@ -125,12 +206,22 @@ export default class Chat extends Component {
       }
       this.setState(newState);
     }
+
+    // if window is blurred and we get a new message, add 1 to title
+    if (!messagesOnly && messageType === 'CHAT' && this.windowBlurred) {
+      this.numMessagesSinceBlur += 1;
+    }
   }
 
   websocketConnected() {
     this.setState({
       webSocketConnected: true,
     });
+
+    const hasPreviouslySetCustomUsername = getLocalStorage(KEY_CUSTOM_USERNAME_SET);
+    if (hasPreviouslySetCustomUsername && !this.props.ignoreClient) {
+      this.sendJoinedMessage();
+    }
   }
 
   websocketDisconnected() {
@@ -138,7 +229,6 @@ export default class Chat extends Component {
       webSocketConnected: false,
     });
   }
-
 
   submitChat(content) {
 		if (!content) {
@@ -151,6 +241,20 @@ export default class Chat extends Component {
 			type: SOCKET_MESSAGE_TYPES.CHAT,
     };
 		this.websocket.send(message);
+  }
+
+  sendJoinedMessage() {
+    const { username } = this.props;
+    const message = {
+			username: username,
+			type: SOCKET_MESSAGE_TYPES.USER_JOINED,
+    };
+
+    // Artificial delay so people who join and immediately
+    // leave don't get counted.
+    this.sendUserJoinedEvent = setTimeout(function() {
+      this.websocket.send(message);
+    }.bind(this), 5000);
   }
 
   updateAuthorList(message) {
@@ -177,19 +281,59 @@ export default class Chat extends Component {
   checkShouldScroll() {
     const { scrollTop, scrollHeight, clientHeight } = this.scrollableMessagesContainer.current;
     const fullyScrolled = scrollHeight - clientHeight;
-
-    return scrollHeight >= clientHeight && fullyScrolled - scrollTop < MESSAGE_JUMPTOBOTTOM_BUFFER;
+    const shouldScroll = scrollHeight >= clientHeight && fullyScrolled - scrollTop < MESSAGE_JUMPTOBOTTOM_BUFFER;
+    return shouldScroll;
   }
 
   handleWindowResize() {
     this.scrollToBottom();
   }
 
+  handleWindowBlur() {
+    this.windowBlurred = true;
+  }
+
+  handleWindowFocus() {
+    this.windowBlurred = false;
+    this.numMessagesSinceBlur = 0;
+    window.document.title = this.props.instanceTitle;
+  }
+
+  // if the messages list grows in number of child message nodes due to new messages received, scroll to bottom.
+  messageListCallback(mutations) {
+    const numMutations = mutations.length;
+    if (numMutations) {
+      const item = mutations[numMutations - 1];
+      if (item.type === 'childList' && item.addedNodes.length) {
+        if (this.state.newMessagesReceived) {
+          if (!this.receivedFirstMessages) {
+            this.scrollToBottom();
+            this.receivedFirstMessages = true;
+          } else if (this.checkShouldScroll()) {
+            this.scrollToBottom();
+          }
+          this.setState({
+            newMessagesReceived: false,
+          });
+        }
+      }
+      // update document title if window blurred
+      if (this.numMessagesSinceBlur && !this.props.messagesOnly && this.windowBlurred) {
+        this.updateDocumentTitle();
+      }
+    }
+  };
+
+  updateDocumentTitle() {
+    const num = this.numMessagesSinceBlur > 10 ? '10+' : this.numMessagesSinceBlur;
+    window.document.title = `${num} 💬 :: ${this.props.instanceTitle}`;
+  }
+
   render(props, state) {
     const { username, messagesOnly, chatInputEnabled } = props;
     const { messages, chatUserNames, webSocketConnected } = state;
 
-    const messageList = messages.map(
+    const messageList = messages.filter(message => message.visible !== false).map(
       (message) =>
         html`<${Message}
           message=${message}

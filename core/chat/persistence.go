@@ -2,6 +2,7 @@ package chat
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -31,32 +32,38 @@ func createTable() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	stmt.Exec()
+	defer stmt.Close()
+	_, err = stmt.Exec()
+	if err != nil {
+		log.Warnln(err)
+	}
 }
 
-func addMessage(message models.ChatMessage) {
+func addMessage(message models.ChatEvent) {
 	tx, err := _db.Begin()
 	if err != nil {
 		log.Fatal(err)
 	}
 	stmt, err := tx.Prepare("INSERT INTO messages(id, author, body, messageType, visible, timestamp) values(?, ?, ?, ?, ?, ?)")
+
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer stmt.Close()
+
 	_, err = stmt.Exec(message.ID, message.Author, message.Body, message.MessageType, 1, message.Timestamp)
 	if err != nil {
 		log.Fatal(err)
 	}
-	tx.Commit()
-
-	defer stmt.Close()
+	err = tx.Commit()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
-func getChatHistory() []models.ChatMessage {
-	history := make([]models.ChatMessage, 0)
-
-	// Get all messages sent within the past day
-	rows, err := _db.Query("SELECT * FROM messages WHERE visible = 1 AND messageType != 'SYSTEM' AND datetime(timestamp) >=datetime('now', '-1 Day')")
+func getChat(query string) []models.ChatEvent {
+	history := make([]models.ChatEvent, 0)
+	rows, err := _db.Query(query)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,18 +73,18 @@ func getChatHistory() []models.ChatMessage {
 		var id string
 		var author string
 		var body string
-		var messageType string
+		var messageType models.EventType
 		var visible int
 		var timestamp time.Time
 
 		err = rows.Scan(&id, &author, &body, &messageType, &visible, &timestamp)
 		if err != nil {
 			log.Debugln(err)
-			log.Error("There is a problem with the chat database.  Please delete chat.db and restart Owncast.")
+			log.Error("There is a problem with the chat database.  Restore a backup of owncast.db or remove it and start over.")
 			break
 		}
 
-		message := models.ChatMessage{}
+		message := models.ChatEvent{}
 		message.ID = id
 		message.Author = author
 		message.Body = body
@@ -88,5 +95,81 @@ func getChatHistory() []models.ChatMessage {
 		history = append(history, message)
 	}
 
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
 	return history
+}
+
+func getChatModerationHistory() []models.ChatEvent {
+	var query = "SELECT * FROM messages WHERE messageType == 'CHAT' AND datetime(timestamp) >=datetime('now', '-5 Hour')"
+	return getChat(query)
+}
+
+func getChatHistory() []models.ChatEvent {
+	// Get all messages sent within the past 5hrs, max 50
+	var query = "SELECT * FROM (SELECT * FROM messages WHERE datetime(timestamp) >=datetime('now', '-5 Hour') AND visible = 1 ORDER BY timestamp DESC LIMIT 50) ORDER BY timestamp asc"
+	return getChat(query)
+}
+
+func saveMessageVisibility(messageIDs []string, visible bool) error {
+	tx, err := _db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	stmt, err := tx.Prepare("UPDATE messages SET visible=? WHERE id IN (?" + strings.Repeat(",?", len(messageIDs)-1) + ")")
+
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	defer stmt.Close()
+
+	args := make([]interface{}, len(messageIDs)+1)
+	args[0] = visible
+	for i, id := range messageIDs {
+		args[i+1] = id
+	}
+
+	_, err = stmt.Exec(args...)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		log.Fatal(err)
+		return err
+	}
+
+	return nil
+}
+
+func getMessageById(messageID string) (models.ChatEvent, error) {
+	var query = "SELECT * FROM messages WHERE id = ?"
+	row := _db.QueryRow(query, messageID)
+
+	var id string
+	var author string
+	var body string
+	var messageType models.EventType
+	var visible int
+	var timestamp time.Time
+
+	err := row.Scan(&id, &author, &body, &messageType, &visible, &timestamp)
+	if err != nil {
+		log.Errorln(err)
+		return models.ChatEvent{}, err
+	}
+
+	return models.ChatEvent{
+		ID:          id,
+		Author:      author,
+		Body:        body,
+		MessageType: messageType,
+		Visible:     visible == 1,
+		Timestamp:   timestamp,
+	}, nil
 }

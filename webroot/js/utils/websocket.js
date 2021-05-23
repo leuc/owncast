@@ -1,3 +1,4 @@
+import { URL_WEBSOCKET } from './constants.js';
 /**
  * These are the types of messages that we can handle with the websocket.
  * Mostly used by `websocket.js` but if other components need to handle
@@ -8,8 +9,12 @@ export const SOCKET_MESSAGE_TYPES = {
   PING: 'PING',
   NAME_CHANGE: 'NAME_CHANGE',
   PONG: 'PONG',
-  SYSTEM: 'SYSTEM'
+  SYSTEM: 'SYSTEM',
+  USER_JOINED: 'USER_JOINED',
+  CHAT_ACTION: 'CHAT_ACTION'
 };
+
+const IGNORE_CLIENT_FLAG = 'IGNORE_CLIENT';
 
 export const CALLBACKS = {
   RAW_WEBSOCKET_MESSAGE_RECEIVED: 'rawWebsocketMessageReceived',
@@ -17,11 +22,10 @@ export const CALLBACKS = {
   WEBSOCKET_DISCONNECTED: 'websocketDisconnected',
 }
 
-const URL_WEBSOCKET = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/entry`;
 const TIMER_WEBSOCKET_RECONNECT = 5000; // ms
 
 export default class Websocket {
-  constructor() {
+  constructor(ignoreClient) {
     this.websocket = null;
     this.websocketReconnectTimer = null;
 
@@ -33,11 +37,14 @@ export default class Websocket {
     this.createAndConnect = this.createAndConnect.bind(this);
     this.scheduleReconnect = this.scheduleReconnect.bind(this);
 
+    this.ignoreClient = ignoreClient;
+
     this.createAndConnect();
   }
 
   createAndConnect() {
-    const ws = new WebSocket(URL_WEBSOCKET);
+    const extraFlags = this.ignoreClient ? [IGNORE_CLIENT_FLAG] : [];
+    const ws = new WebSocket(URL_WEBSOCKET, extraFlags);
     ws.onopen = this.onOpen.bind(this);
     ws.onclose = this.onClose.bind(this);
     ws.onerror = this.onError.bind(this);
@@ -155,6 +162,6 @@ export default class Websocket {
   }
 
   handleNetworkingError(error) {
-    console.error(`Websocket Error: ${error}`);
+    console.error(`Websocket Error. Chat is likely not working. Visit troubleshooting steps to resolve. https://owncast.online/docs/troubleshooting/#chat-is-disabled: ${error}`);
   }
 }

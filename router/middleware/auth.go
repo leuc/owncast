@@ -3,8 +3,9 @@ package middleware
 import (
 	"crypto/subtle"
 	"net/http"
+	"strings"
 
-	"github.com/owncast/owncast/config"
+	"github.com/owncast/owncast/core/data"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -13,7 +14,7 @@ import (
 func RequireAdminAuth(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := "admin"
-		password := config.Config.VideoSettings.StreamingKey
+		password := data.GetStreamKey()
 		realm := "Owncast Authenticated Request"
 
 		// The following line is kind of a work around.
@@ -36,10 +37,41 @@ func RequireAdminAuth(handler http.HandlerFunc) http.HandlerFunc {
 		if !ok || subtle.ConstantTimeCompare([]byte(user), []byte(username)) != 1 || subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			log.Warnln("Failed authentication for", r.URL.Path, "from", r.RemoteAddr, r.UserAgent())
+			log.Debugln("Failed authentication for", r.URL.Path, "from", r.RemoteAddr, r.UserAgent())
 			return
 		}
 
 		handler(w, r)
 	}
+}
+
+func RequireAccessToken(scope string, handler http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := strings.Split(r.Header.Get("Authorization"), "Bearer ")
+		token := strings.Join(authHeader, "")
+
+		if len(authHeader) == 0 || token == "" {
+			log.Warnln("invalid access token")
+			w.WriteHeader(http.StatusUnauthorized)  //nolint
+			w.Write([]byte("invalid access token")) //nolint
+			return
+		}
+
+		if accepted, err := data.DoesTokenSupportScope(token, scope); err != nil {
+			w.WriteHeader(http.StatusInternalServerError) //nolint
+			w.Write([]byte(err.Error()))                  //nolint
+			return
+		} else if !accepted {
+			log.Warnln("invalid access token")
+			w.WriteHeader(http.StatusUnauthorized)  //nolint
+			w.Write([]byte("invalid access token")) //nolint
+			return
+		}
+
+		handler(w, r)
+
+		if err := data.SetAccessTokenAsUsed(token); err != nil {
+			log.Debugln(token, "not found when updating last_used timestamp")
+		}
+	})
 }

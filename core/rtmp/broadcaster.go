@@ -11,8 +11,7 @@ import (
 func setCurrentBroadcasterInfo(t flvio.Tag, remoteAddr string) {
 	data, err := getInboundDetailsFromMetadata(t.DebugFields())
 	if err != nil {
-		log.Errorln(err)
-		return
+		log.Warnln("Unable to parse inbound broadcaster details:", err)
 	}
 
 	broadcaster := models.Broadcaster{
@@ -27,6 +26,7 @@ func setCurrentBroadcasterInfo(t flvio.Tag, remoteAddr string) {
 			AudioBitrate:   int(data.AudioBitrate),
 			AudioCodec:     getAudioCodec(data.AudioCodec),
 			Encoder:        data.Encoder,
+			VideoOnly:      data.AudioCodec == nil,
 		},
 	}
 

@@ -3,12 +3,14 @@ package chat
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/websocket"
 
-	"github.com/owncast/owncast/config"
+	"github.com/owncast/owncast/core/data"
+	"github.com/owncast/owncast/core/webhooks"
 	"github.com/owncast/owncast/models"
 )
 
@@ -16,7 +18,9 @@ var (
 	_server *server
 )
 
-//Server represents the server which handles the chat
+var l = &sync.RWMutex{}
+
+// Server represents the server which handles the chat.
 type server struct {
 	Clients map[string]*Client
 
@@ -25,69 +29,86 @@ type server struct {
 
 	addCh     chan *Client
 	delCh     chan *Client
-	sendAllCh chan models.ChatMessage
+	sendAllCh chan models.ChatEvent
 	pingCh    chan models.PingMessage
 	doneCh    chan bool
 	errCh     chan error
 }
 
-//Add adds a client to the server
+// Add adds a client to the server.
 func (s *server) add(c *Client) {
 	s.addCh <- c
 }
 
-//Remove removes a client from the server
+// Remove removes a client from the server.
 func (s *server) remove(c *Client) {
 	s.delCh <- c
 }
 
-//SendToAll sends a message to all of the connected clients
-func (s *server) SendToAll(msg models.ChatMessage) {
+// SendToAll sends a message to all of the connected clients.
+func (s *server) SendToAll(msg models.ChatEvent) {
 	s.sendAllCh <- msg
 }
 
-//Done marks the server as done
-func (s *server) done() {
-	s.doneCh <- true
-}
-
-//Err handles an error
+// Err handles an error.
 func (s *server) err(err error) {
 	s.errCh <- err
 }
 
-func (s *server) sendAll(msg models.ChatMessage) {
+func (s *server) sendAll(msg models.ChatEvent) {
+	l.RLock()
 	for _, c := range s.Clients {
-		c.Write(msg)
+		c.write(msg)
 	}
+	l.RUnlock()
 }
 
 func (s *server) ping() {
-	ping := models.PingMessage{MessageType: PING}
+	ping := models.PingMessage{MessageType: models.PING}
+
+	l.RLock()
 	for _, c := range s.Clients {
 		c.pingch <- ping
 	}
+	l.RUnlock()
 }
 
 func (s *server) usernameChanged(msg models.NameChangeEvent) {
+	l.RLock()
 	for _, c := range s.Clients {
 		c.usernameChangeChannel <- msg
 	}
+	l.RUnlock()
+
+	go webhooks.SendChatEventUsernameChanged(msg)
+}
+
+func (s *server) userJoined(msg models.UserJoinedEvent) {
+	l.RLock()
+	if s.listener.IsStreamConnected() {
+		for _, c := range s.Clients {
+			c.userJoinedChannel <- msg
+		}
+	}
+	l.RUnlock()
+
+	go webhooks.SendChatEventUserJoined(msg)
 }
 
 func (s *server) onConnection(ws *websocket.Conn) {
 	client := NewClient(ws)
 
 	defer func() {
-		log.Tracef("The client was connected for %s and sent %d messages (%s)", time.Since(client.ConnectedAt), client.MessageCount, client.ClientID)
+		s.removeClient(client)
 
 		if err := ws.Close(); err != nil {
-			s.errCh <- err
+			log.Debugln(err)
+			//s.errCh <- err
 		}
 	}()
 
 	s.add(client)
-	client.Listen()
+	client.listen()
 }
 
 // Listen and serve.
@@ -101,32 +122,43 @@ func (s *server) Listen() {
 		select {
 		// add new a client
 		case c := <-s.addCh:
+			l.Lock()
 			s.Clients[c.socketID] = c
-			s.listener.ClientAdded(c.GetViewerClientFromChatClient())
-			s.sendWelcomeMessageToClient(c)
+
+			if !c.Ignore {
+				s.listener.ClientAdded(c.GetViewerClientFromChatClient())
+				s.sendWelcomeMessageToClient(c)
+			}
+			l.Unlock()
 
 		// remove a client
 		case c := <-s.delCh:
-			delete(s.Clients, c.socketID)
-			s.listener.ClientRemoved(c.socketID)
-
-			// message was recieved from a client and should be sanitized, validated
-			// and distributed to other clients.
+			s.removeClient(c)
 		case msg := <-s.sendAllCh:
-			// Will turn markdown into html, sanitize user-supplied raw html
-			// and standardize this message into something safe we can send everyone else.
-			msg.RenderAndSanitizeMessageBody()
+			if data.GetChatDisabled() {
+				break
+			}
 
-			s.listener.MessageSent(msg)
-			s.sendAll(msg)
+			if !msg.Empty() {
+				// set defaults before sending msg to anywhere
+				msg.SetDefaults()
 
-			// Store in the message history
-			addMessage(msg)
+				s.listener.MessageSent(msg)
+				s.sendAll(msg)
+
+				// Store in the message history
+				if !msg.Ephemeral {
+					addMessage(msg)
+				}
+
+				// Send webhooks
+				go webhooks.SendChatEvent(msg)
+			}
 		case ping := <-s.pingCh:
 			fmt.Println("PING?", ping)
 
 		case err := <-s.errCh:
-			log.Error("Error:", err.Error())
+			log.Trace("Error: ", err.Error())
 
 		case <-s.doneCh:
 			return
@@ -134,24 +166,26 @@ func (s *server) Listen() {
 	}
 }
 
+func (s *server) removeClient(c *Client) {
+	l.Lock()
+	if _, ok := s.Clients[c.socketID]; ok {
+		delete(s.Clients, c.socketID)
+
+		s.listener.ClientRemoved(c.socketID)
+		log.Tracef("The client was connected for %s and sent %d messages (%s)", time.Since(c.ConnectedAt), c.MessageCount, c.ClientID)
+	}
+	l.Unlock()
+}
+
 func (s *server) sendWelcomeMessageToClient(c *Client) {
 	go func() {
 		// Add an artificial delay so people notice this message come in.
 		time.Sleep(7 * time.Second)
 
-		initialChatMessageText := fmt.Sprintf("Welcome to %s! %s", config.Config.InstanceDetails.Title, config.Config.InstanceDetails.Summary)
-		initialMessage := models.ChatMessage{"owncast-server", config.Config.InstanceDetails.Name, initialChatMessageText, "initial-message-1", "SYSTEM", true, time.Now()}
-		c.Write(initialMessage)
-	}()
-
-}
-
-func (s *server) getClientForClientID(clientID string) *Client {
-	for _, client := range s.Clients {
-		if client.ClientID == clientID {
-			return client
+		welcomeMessage := data.GetServerWelcomeMessage()
+		if welcomeMessage != "" {
+			initialMessage := models.ChatEvent{ClientID: "owncast-server", Author: data.GetServerName(), Body: welcomeMessage, ID: "initial-message-1", MessageType: "SYSTEM", Visible: true, Timestamp: time.Now()}
+			c.write(initialMessage)
 		}
-	}
-
-	return nil
+	}()
 }

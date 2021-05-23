@@ -16,9 +16,8 @@ shutdown () {
 }
 trap shutdown INT TERM ABRT EXIT
 
-cd $INSTALL_TEMP_DIRECTORY
-
-git clone --quiet --depth 1 https://github.com/owncast/owncast-admin
+echo "Cloning owncast admin into $INSTALL_TEMP_DIRECTORY..."
+git clone https://github.com/owncast/owncast-admin 2> /dev/null
 cd owncast-admin
 
 $NPM install --silent --no-progress --no-audit --no-fund 
