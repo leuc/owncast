@@ -49,9 +49,10 @@ archives:
       linux: linux
     files:
       - README.md
-      - doc/*/**
+      - LICENSE
       - webroot/*/**
-      - 
+      - static/*/**
+      - data
 
 changelog:
   sort: asc
