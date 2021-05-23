@@ -52,19 +52,19 @@ jobs:
             case "${{ matrix.distro }}" in
               ubuntu*|jessie|stretch|buster)
                 apt-get update -qq -y
-                apt-get install -qq -y golang npm git
+                apt-get install -qq -y golang npm git curl
                 go get github.com/markbates/pkger/cmd/pkger
                 curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh
                 ;;
               fedora*)
                 dnf -y update
-                dnf -y install golang nodejs git
+                dnf -y install golang nodejs git curl
                 go get github.com/markbates/pkger/cmd/pkger
                 curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh
                 ;;
               alpine*)
                 apk update
-                apk add go npm git
+                apk add go npm git curl
                 go get github.com/markbates/pkger/cmd/pkger
                 curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh
                 ;;
