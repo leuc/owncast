@@ -1,7 +1,6 @@
 ---
 
 name: goreleaser
-
 on:
   pull_request:
   push:
@@ -29,7 +28,7 @@ jobs:
           - arch: arm7
             distro: ubuntu18.04
           - arch: arm6
-            distro: ubuntu18.04
+            distro: buster
     steps:
       - uses: actions/checkout@v2
         with:

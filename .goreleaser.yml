@@ -1,3 +1,5 @@
+---
+
 before:
   hooks:
     - rm -rf ./webroot/hls/* ./hls/* ./webroot/thumbnail.jpg ./build/javascript/node_modules
@@ -13,9 +15,9 @@ builds:
     binary: owncast
     flags:
       - -trimpath
-    ldflags: 
-      - -s -w 
-      - -X main.BuildVersion={{ .Version }} 
+    ldflags:
+      - -s -w
+      - -X main.BuildVersion={{ .Version }}
       - -X main.GitCommit={{ .Commit }}
       - -X main.BuildType={{ .Os }}-{{ .Arch }}
       - -X main.Date={{ .CommitDate }}
