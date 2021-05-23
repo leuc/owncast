@@ -1,7 +1,11 @@
 before:
   hooks:
+    - rm -rf ./webroot/hls/* ./hls/* ./webroot/thumbnail.jpg
     - go mod tidy
     - go mod download
+    - build/javascript/tailwind.sh
+    - build/admin/bundleAdmin.sh
+
 builds:
   - id: "owncast"
     env:
@@ -24,6 +28,17 @@ builds:
     goarm:
     # - 7
     mod_timestamp: '{{ .CommitTimestamp }}'
+    hooks:
+      post:
+        - cmd: mkdir -p dist/{{ .ProjectName }}_{{ .Target }}/webroot/static
+        - cmd: mkdir -p dist/{{ .ProjectName }}_{{ .Target }}/data
+        - cmd: cp -R webroot dist/{{ .ProjectName }}_{{ .Target }}/
+        - cmd: cp -R doc dist/{{ .ProjectName }}_{{ .Target }}/
+        - cmd: cp -R static dist/{{ .ProjectName }}_{{ .Target }}/
+        - cmd: cp config-example.yaml dist/{{ .ProjectName }}_{{ .Target }}/config.yaml
+        - cmd: cp data/content-example.md dist/{{ .ProjectName }}_{{ .Target }}/webroot/static/content.md
+        - cmd: cp build/javascript/tailwind.min.css dist/{{ .ProjectName }}_{{ .Target }}/webroot/js/web_modules/tailwindcss/dist/tailwind.min.css
+        - cmd: cp LICENSE README.md dist/{{ .ProjectName }}_{{ .Target }}/
 
 archives:
   - id: GitHub-Zip
@@ -36,6 +51,11 @@ archives:
       amd64: 64bit
       darwin: macOS
       linux: linux
+    files:
+      - README.md
+      - doc/*/**
+      - webroot/*/**
+      - 
 
 changelog:
   sort: asc
