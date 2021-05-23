@@ -24,14 +24,9 @@ builds:
     goos:
       - linux
     goarch:
-      - amd64
-      - 386
-      - arm
-      - arm64
-      - s390x
+      - '{{ .Env.GOARCH }}'
     goarm:
       - 7
-      - 6
     mod_timestamp: '{{ .CommitTimestamp }}'
     hooks:
       post:

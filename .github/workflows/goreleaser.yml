@@ -18,6 +18,8 @@ jobs:
         with:
           version: latest
           args: release --snapshot --skip-publish --skip-sign --rm-dist
+        env:
+          GOARCH: amd64
 
   other-arch:
     runs-on: ubuntu-20.04
@@ -26,10 +28,6 @@ jobs:
       matrix:
         include:
           - arch: armv7
-            distro: ubuntu20.04
-          - arch: armv6
-            distro: buster
-          - arch: s390x
             distro: ubuntu20.04
     steps:
       - uses: actions/checkout@v2
@@ -50,8 +48,9 @@ jobs:
             case "${{ matrix.distro }}" in
               ubuntu*|jessie|stretch|buster)
                 apt-get update -q -y
-                apt-get install -q -y golang goreleaser npm
+                apt-get install -q -y golang npm
                 go get github.com/markbates/pkger/cmd/pkger
+                go install github.com/goreleaser/goreleaser
                 ;;
               fedora*)
                 dnf -y update
@@ -64,7 +63,7 @@ jobs:
             esac
 
           run: |
-            goreleaser release --skip-sign --skip-publish --rm-dist --snapshot
+            GOARCH=${{ matrix.arch }} goreleaser release --skip-sign --skip-publish --rm-dist --snapshot
             cp dist/*zip /artifacts/
 
       - name: Show the artifact on host
