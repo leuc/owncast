@@ -6,24 +6,66 @@ on:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
-      - name: Install Deps
-        run: sudo apt-get update -qq && sudo apt-get install gcc-multilib libc6-dev-i386-cross npm
-
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-
+      - uses: actions/setup-go@v2
+      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v2
       - name: Install Go Pkger
         run: go get github.com/markbates/pkger/cmd/pkger
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v2
+      - uses: goreleaser/goreleaser-action@v2
         with:
           version: latest
           args: release --snapshot --skip-publish --skip-sign --rm-dist
+
+  other-arch:
+    runs-on: ubuntu-18.04
+    name: Build on ${{ matrix.distro }} ${{ matrix.arch }}
+	strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            distro: ubuntu18.04
+          - arch: ppc64le
+            distro: ubuntu18.04
+          - arch: arm7
+            distro: ubuntu18.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - uses: uraimo/run-on-arch-action@v2.0.5
+        name: Run commands
+        id: runcmd
+        with:
+          arch: ${{ matrix.arch }}
+          distro: ${{ matrix.distro }}
+          setup: |
+            mkdir -p "${PWD}/artifacts"
+          dockerRunArgs: |
+            --volume "${PWD}/artifacts:/artifacts"
+          install: |
+            case "${{ matrix.distro }}" in
+              ubuntu*|jessie|stretch|buster)
+                apt-get update -q -y
+                apt-get install -q -y golang goreleaser npm
+                go get github.com/markbates/pkger/cmd/pkger
+                ;;
+              fedora*)
+                dnf -y update
+                dnf -y install git which
+                ;;
+              alpine*)
+                apk update
+                apk add git
+                ;;
+            esac
+
+          run: |
+            goreleaser release --skip-sign --skip-publish --rm-dist --snapshot
+            cp dist/*zip /artifacts/
+
+      - name: Show the artifact on host
+        run: |
+          ls -al "${PWD}/artifacts"
