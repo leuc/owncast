@@ -1,3 +1,5 @@
+---
+
 name: goreleaser
 
 on:
@@ -21,14 +23,12 @@ jobs:
   other-arch:
     runs-on: ubuntu-18.04
     name: Build on ${{ matrix.distro }} ${{ matrix.arch }}
-	strategy:
+    strategy:
       matrix:
         include:
-          - arch: aarch64
-            distro: ubuntu18.04
-          - arch: ppc64le
-            distro: ubuntu18.04
           - arch: arm7
+            distro: ubuntu18.04
+          - arch: arm6
             distro: ubuntu18.04
     steps:
       - uses: actions/checkout@v2

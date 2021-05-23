@@ -24,9 +24,11 @@ builds:
     goarch:
       - amd64
       - 386
-    # - arm
+      - arm
+      - arm64
     goarm:
-    # - 7
+      - 7
+      - 6
     mod_timestamp: '{{ .CommitTimestamp }}'
     hooks:
       post:
