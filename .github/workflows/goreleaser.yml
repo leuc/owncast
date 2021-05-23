@@ -54,19 +54,19 @@ jobs:
                 apt-get update -qq -y
                 apt-get install -qq -y golang npm git
                 go get github.com/markbates/pkger/cmd/pkger
-                go install github.com/goreleaser/goreleaser
+                curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh
                 ;;
               fedora*)
                 dnf -y update
                 dnf -y install golang nodejs git
                 go get github.com/markbates/pkger/cmd/pkger
-                go install github.com/goreleaser/goreleaser
+                curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh
                 ;;
               alpine*)
                 apk update
                 apk add go npm git
                 go get github.com/markbates/pkger/cmd/pkger
-                go install github.com/goreleaser/goreleaser
+                curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh
                 ;;
             esac
 
