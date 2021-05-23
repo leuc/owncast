@@ -28,6 +28,7 @@ builds:
       - 386
       - arm
       - arm64
+      - s390x
     goarm:
       - 7
       - 6

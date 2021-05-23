@@ -7,7 +7,7 @@ on:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/setup-go@v2
       - uses: actions/setup-node@v2
@@ -20,15 +20,17 @@ jobs:
           args: release --snapshot --skip-publish --skip-sign --rm-dist
 
   other-arch:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     name: Build on ${{ matrix.distro }} ${{ matrix.arch }}
     strategy:
       matrix:
         include:
-          - arch: arm7
-            distro: ubuntu18.04
-          - arch: arm6
+          - arch: armv7
+            distro: ubuntu20.04
+          - arch: armv6
             distro: buster
+          - arch: s390x
+            distro: ubuntu20.04
     steps:
       - uses: actions/checkout@v2
         with:
