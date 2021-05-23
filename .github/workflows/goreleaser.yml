@@ -17,9 +17,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@v2
         with:
           version: latest
-          args: release --snapshot --skip-publish --skip-sign --rm-dist
-        env:
-          GOARCH: amd64
+          args: build --single-target --snapshot --rm-dist
 
   other-arch:
     runs-on: ubuntu-20.04
@@ -73,7 +71,7 @@ jobs:
             esac
 
           run: |
-            GOARCH=${{ matrix.arch }} goreleaser release --skip-sign --skip-publish --rm-dist --snapshot
+            build --single-target --snapshot --rm-dist
             cp dist/*zip /artifacts/
 
       - name: Show the artifact on host
